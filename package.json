@@ -10,8 +10,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.174.0",
-    "leaflet": "^1.9.4",
-    "react-leaflet": "^4.2.1"
+    "leaflet": "^1.9.4"
   },
   "devDependencies": {
     "@types/react": "^19.0.8",
