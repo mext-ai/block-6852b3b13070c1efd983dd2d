@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle } from 'react-leaflet';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -25,7 +24,10 @@ interface GPSPoint {
 }
 
 const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", description = "Itinéraire complet avec étapes, bivouacs et liaisons" }) => {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const leafletMapRef = useRef<L.Map | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<GPSPoint | null>(null);
+  const [isMapInitialized, setIsMapInitialized] = useState(false);
 
   // Coordonnées GPS du rallye au Kazakhstan
   const gpsPoints: GPSPoint[] = [
@@ -63,6 +65,9 @@ const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", des
     { name: "Liaison G - Kyzylorda-Shymkent", lat: 43.6000, lng: 67.3000, type: 'liaison', description: "Route sud" }
   ];
 
+  // Centre de la carte (centre du Kazakhstan)
+  const mapCenter: [number, number] = [48.0196, 66.9237];
+
   // Créer les icônes personnalisées
   const createIcon = (type: string) => {
     const colors = {
@@ -98,11 +103,72 @@ const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", des
     .filter(point => point.type === 'etape' || point.type === 'special')
     .map(point => [point.lat, point.lng] as [number, number]);
 
-  // Centre de la carte (centre du Kazakhstan)
-  const mapCenter: [number, number] = [48.0196, 66.9237];
-
   useEffect(() => {
-    // Envoyer l'événement de completion dès le chargement de la carte
+    if (!mapRef.current || leafletMapRef.current) return;
+
+    // Initialiser la carte
+    const map = L.map(mapRef.current).setView(mapCenter, 6);
+    leafletMapRef.current = map;
+
+    // Ajouter la couche de tuiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // Ajouter la ligne de l'itinéraire principal
+    const routeLine = L.polyline(routeCoordinates, {
+      color: '#e74c3c',
+      weight: 3,
+      opacity: 0.7,
+      dashArray: '5, 10'
+    }).addTo(map);
+
+    // Ajouter les marqueurs pour tous les points
+    gpsPoints.forEach((point) => {
+      const marker = L.marker([point.lat, point.lng], {
+        icon: createIcon(point.type)
+      }).addTo(map);
+
+      // Ajouter popup
+      const popupContent = `
+        <div style="min-width: 200px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px;">${point.name}</h3>
+          <p style="margin: 0 0 5px 0; font-size: 14px;">
+            <strong>Type:</strong> ${point.type.charAt(0).toUpperCase() + point.type.slice(1)}
+          </p>
+          <p style="margin: 0 0 5px 0; font-size: 14px;">
+            <strong>Coordonnées:</strong> ${point.lat.toFixed(4)}°, ${point.lng.toFixed(4)}°
+          </p>
+          ${point.description ? `<p style="margin: 5px 0 0 0; font-size: 14px;">${point.description}</p>` : ''}
+        </div>
+      `;
+      
+      marker.bindPopup(popupContent);
+
+      // Ajouter événement de clic
+      marker.on('click', () => {
+        setSelectedPoint(point);
+      });
+    });
+
+    // Ajouter cercles pour mettre en évidence les zones importantes
+    L.circle([43.2220, 76.8512], { // Almaty
+      color: '#f39c12',
+      fillColor: '#f39c12',
+      fillOpacity: 0.1,
+      radius: 50000
+    }).addTo(map);
+
+    L.circle([51.1694, 71.4491], { // Astana
+      color: '#f39c12',
+      fillColor: '#f39c12',
+      fillOpacity: 0.1,
+      radius: 50000
+    }).addTo(map);
+
+    setIsMapInitialized(true);
+
+    // Envoyer l'événement de completion
     const sendCompletion = () => {
       window.postMessage({ 
         type: 'BLOCK_COMPLETION', 
@@ -119,7 +185,14 @@ const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", des
     };
 
     const timer = setTimeout(sendCompletion, 1000);
-    return () => clearTimeout(timer);
+
+    return () => {
+      clearTimeout(timer);
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove();
+        leafletMapRef.current = null;
+      }
+    };
   }, []);
 
   return (
@@ -175,6 +248,9 @@ const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", des
           <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
             Total: {gpsPoints.length} points GPS
           </p>
+          <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: isMapInitialized ? '#2ecc71' : '#f39c12' }}>
+            Statut: {isMapInitialized ? '✓ Carte chargée' : '⏳ Chargement...'}
+          </p>
         </div>
       </div>
 
@@ -221,72 +297,57 @@ const Block: React.FC<BlockProps> = ({ title = "Carte du Rallye Kazakhstan", des
         </div>
       )}
 
-      {/* Carte */}
-      <MapContainer
-        center={mapCenter}
-        zoom={6}
-        style={{ height: '100%', width: '100%' }}
-        zoomControl={true}
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
-        
-        {/* Ligne de l'itinéraire principal */}
-        <Polyline
-          positions={routeCoordinates}
-          color="#e74c3c"
-          weight={3}
-          opacity={0.7}
-          dashArray="5, 10"
-        />
+      {/* Conteneur de la carte */}
+      <div 
+        ref={mapRef} 
+        style={{ 
+          height: '100%', 
+          width: '100%',
+          background: isMapInitialized ? 'transparent' : '#f0f0f0'
+        }} 
+      />
 
-        {/* Marqueurs pour tous les points */}
-        {gpsPoints.map((point, index) => (
-          <Marker
-            key={index}
-            position={[point.lat, point.lng]}
-            icon={createIcon(point.type)}
-            eventHandlers={{
-              click: () => setSelectedPoint(point)
-            }}
-          >
-            <Popup>
-              <div style={{ minWidth: '200px' }}>
-                <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>{point.name}</h3>
-                <p style={{ margin: '0 0 5px 0', fontSize: '14px' }}>
-                  <strong>Type:</strong> {point.type.charAt(0).toUpperCase() + point.type.slice(1)}
-                </p>
-                <p style={{ margin: '0 0 5px 0', fontSize: '14px' }}>
-                  <strong>Coordonnées:</strong> {point.lat.toFixed(4)}°, {point.lng.toFixed(4)}°
-                </p>
-                {point.description && (
-                  <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>
-                    {point.description}
-                  </p>
-                )}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+      {/* Indicateur de chargement */}
+      {!isMapInitialized && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(255, 255, 255, 0.9)',
+          padding: '20px',
+          borderRadius: '8px',
+          textAlign: 'center',
+          zIndex: 1001
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #3498db',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 10px'
+          }} />
+          <p style={{ margin: 0, fontSize: '14px', color: '#333' }}>
+            Chargement de la carte...
+          </p>
+        </div>
+      )}
 
-        {/* Cercles pour mettre en évidence les zones importantes */}
-        <Circle
-          center={[43.2220, 76.8512]} // Almaty
-          radius={50000}
-          color="#f39c12"
-          fillColor="#f39c12"
-          fillOpacity={0.1}
-        />
-        <Circle
-          center={[51.1694, 71.4491]} // Astana
-          radius={50000}
-          color="#f39c12"
-          fillColor="#f39c12"
-          fillOpacity={0.1}
-        />
-      </MapContainer>
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .leaflet-container {
+          font-family: Arial, sans-serif;
+        }
+        .custom-marker {
+          background: none !important;
+          border: none !important;
+        }
+      `}</style>
     </div>
   );
 };
